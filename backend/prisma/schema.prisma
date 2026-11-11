@@ -1,0 +1,172 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum UserRole {
+  ADMIN
+  ACCOUNT_HOLDER
+}
+
+enum AccountType {
+  CHECKING
+  SAVINGS
+  SYSTEM
+}
+
+enum AccountStatus {
+  PENDING
+  ACTIVE
+  FROZEN
+  CLOSED
+}
+
+enum OnboardingStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  TRANSFER
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REVERSED
+}
+
+enum LedgerEntryType {
+  DEBIT
+  CREDIT
+}
+
+model User {
+  id                 String              @id @default(cuid()) @db.VarChar(30)
+  fullName           String              @db.VarChar(120)
+  email              String              @unique @db.VarChar(254)
+  passwordHash       String              @db.VarChar(255)
+  role               UserRole            @default(ACCOUNT_HOLDER)
+  isActive           Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  accounts           Account[]
+  onboardingRequests OnboardingRequest[] @relation("Applicant")
+  reviewedRequests   OnboardingRequest[] @relation("Reviewer")
+  transactions       Transaction[]       @relation("InitiatedTransactions")
+  auditLogs          AuditLog[]          @relation("AuditActor")
+  idempotencyKeys    IdempotencyKey[]
+
+  @@index([role, isActive])
+}
+
+model Account {
+  id                   String        @id @default(cuid()) @db.VarChar(30)
+  accountNumber        String        @unique @db.VarChar(32)
+  userId               String?       @db.VarChar(30)
+  type                 AccountType   @default(CHECKING)
+  status               AccountStatus @default(PENDING)
+  currency             String        @default("USD") @db.Char(3)
+  balance              Decimal       @default(0) @db.Decimal(19, 4)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  owner                User?         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  outgoingTransactions Transaction[] @relation("TransactionSource")
+  incomingTransactions Transaction[] @relation("TransactionDestination")
+  ledgerEntries        LedgerEntry[]
+
+  @@index([userId, status])
+  @@index([type, status])
+}
+
+model OnboardingRequest {
+  id          String           @id @default(cuid()) @db.VarChar(30)
+  userId      String           @db.VarChar(30)
+  status      OnboardingStatus @default(PENDING)
+  submittedAt DateTime         @default(now())
+  reviewedAt  DateTime?
+  reviewedBy  String?          @db.VarChar(30)
+  reviewNote  String?          @db.VarChar(500)
+  applicant   User             @relation("Applicant", fields: [userId], references: [id], onDelete: Restrict)
+  reviewer    User?            @relation("Reviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+
+  @@index([status, submittedAt])
+  @@index([userId, submittedAt])
+}
+
+model Transaction {
+  id                   String            @id @default(cuid()) @db.VarChar(30)
+  type                 TransactionType
+  status               TransactionStatus @default(PENDING)
+  amount               Decimal           @db.Decimal(19, 4)
+  currency             String            @default("USD") @db.Char(3)
+  sourceAccountId      String?           @db.VarChar(30)
+  destinationAccountId String?           @db.VarChar(30)
+  initiatedById        String            @db.VarChar(30)
+  description          String?           @db.VarChar(255)
+  createdAt            DateTime          @default(now())
+  completedAt          DateTime?
+  sourceAccount        Account?          @relation("TransactionSource", fields: [sourceAccountId], references: [id], onDelete: Restrict)
+  destinationAccount   Account?          @relation("TransactionDestination", fields: [destinationAccountId], references: [id], onDelete: Restrict)
+  initiatedBy          User              @relation("InitiatedTransactions", fields: [initiatedById], references: [id], onDelete: Restrict)
+  ledgerEntries        LedgerEntry[]
+  idempotencyKey       IdempotencyKey?
+
+  @@index([type, status, createdAt])
+  @@index([sourceAccountId, createdAt])
+  @@index([destinationAccountId, createdAt])
+  @@index([initiatedById, createdAt])
+}
+
+model LedgerEntry {
+  id            String          @id @default(cuid()) @db.VarChar(30)
+  transactionId String          @db.VarChar(30)
+  accountId     String          @db.VarChar(30)
+  type          LedgerEntryType
+  amount        Decimal         @db.Decimal(19, 4)
+  createdAt     DateTime        @default(now())
+  transaction   Transaction     @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  account       Account         @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([transactionId])
+  @@index([accountId, createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid()) @db.VarChar(30)
+  actorId    String?  @db.VarChar(30)
+  action     String   @db.VarChar(100)
+  targetType String?  @db.VarChar(80)
+  targetId   String?  @db.VarChar(100)
+  outcome    String   @db.VarChar(40)
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@index([targetType, targetId])
+}
+
+model IdempotencyKey {
+  id            String       @id @default(cuid()) @db.VarChar(30)
+  userId        String       @db.VarChar(30)
+  key           String       @db.VarChar(128)
+  requestHash   String       @db.Char(64)
+  transactionId String?      @unique @db.VarChar(30)
+  createdAt     DateTime     @default(now())
+  expiresAt     DateTime?
+  user          User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, key])
+  @@index([expiresAt])
+}

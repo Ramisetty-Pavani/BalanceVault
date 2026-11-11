@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import './App.css'
 
 function ShieldIcon() {
@@ -37,38 +37,112 @@ function EyeIcon({ visible }) {
   )
 }
 
+function getPasswordStrength(password) {
+  if (!password) {
+    return { label: '', score: 0, className: 'strength-none' }
+  }
+
+  let score = 0
+
+  if (password.length >= 12) score += 1
+  if (/[A-Z]/.test(password)) score += 1
+  if (/[0-9]/.test(password)) score += 1
+  if (/[^A-Za-z0-9]/.test(password)) score += 1
+
+  if (score <= 1) {
+    return { label: 'Weak', score, className: 'strength-weak' }
+  }
+
+  if (score === 2 || score === 3) {
+    return { label: 'Good', score, className: 'strength-good' }
+  }
+
+  return { label: 'Strong', score, className: 'strength-strong' }
+}
+
 function App() {
-  const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
+  const [mode, setMode] = useState('login')
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [loginForm, setLoginForm] = useState({
+    email: '',
+    password: '',
+    rememberMe: false,
+  })
+  const [registerForm, setRegisterForm] = useState({
+    fullName: '',
+    email: '',
+    password: '',
+    confirmPassword: '',
+    agreeTerms: false,
+  })
   const [submissionMessage, setSubmissionMessage] = useState('')
-  const confirmPasswordInput = useRef(null)
 
-  function handleSubmit(event) {
+  const passwordStrength = useMemo(
+    () => getPasswordStrength(registerForm.password),
+    [registerForm.password],
+  )
+
+  function handleLoginSubmit(event) {
     event.preventDefault()
+
+    if (!loginForm.email || !loginForm.password) {
+      setSubmissionMessage('Please enter both your email address and password.')
+      return
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginForm.email)) {
+      setSubmissionMessage('Enter a valid email address before continuing.')
+      return
+    }
+
+    setSubmissionMessage(
+      'Login is not connected to the backend yet. This demo only validates the form inputs.',
+    )
+  }
+
+  function handleRegisterSubmit(event) {
+    event.preventDefault()
+
+    if (!registerForm.fullName.trim()) {
+      setSubmissionMessage('Please enter your full name.')
+      return
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(registerForm.email)) {
+      setSubmissionMessage('Please use a valid email address.')
+      return
+    }
+
+    if (registerForm.password.length < 12) {
+      setSubmissionMessage('Password must be at least 12 characters long.')
+      return
+    }
+
+    if (registerForm.password !== registerForm.confirmPassword) {
+      setSubmissionMessage('Your passwords do not match. Please try again.')
+      return
+    }
+
+    if (passwordStrength.score < 3) {
+      setSubmissionMessage(
+        'Choose a stronger password with a mix of letters, numbers, and symbols.',
+      )
+      return
+    }
+
+    if (!registerForm.agreeTerms) {
+      setSubmissionMessage('Please accept the prototype notice before creating your account.')
+      return
+    }
+
     setSubmissionMessage(
       'Registration is not connected to a backend yet. Your information has not been sent or saved.',
     )
   }
 
-  function handlePasswordChange(event) {
-    const value = event.target.value
-    setPassword(value)
-    confirmPasswordInput.current?.setCustomValidity(
-      confirmPassword && confirmPassword !== value
-        ? 'Passwords do not match.'
-        : '',
-    )
-    setSubmissionMessage('')
-  }
-
-  function handleConfirmPasswordChange(event) {
-    const value = event.target.value
-    setConfirmPassword(value)
-    event.target.setCustomValidity(
-      value && value !== password ? 'Passwords do not match.' : '',
-    )
+  function handleModeChange(nextMode) {
+    setMode(nextMode)
     setSubmissionMessage('')
   }
 
@@ -146,114 +220,279 @@ function App() {
         <div className="form-wrap">
           <div className="form-heading">
             <p className="eyebrow">YOUR FINANCIAL HOME</p>
-            <h2>Create your account</h2>
+            <h2>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h2>
             <p className="form-intro">
-              Start with the essentials. You can finish setting up your account
-              later.
+              {mode === 'login'
+                ? 'Sign in to continue to your secure finance workspace.'
+                : 'Start with the essentials. You can finish setting up your account later.'}
             </p>
           </div>
 
-          <form className="signup-form" onSubmit={handleSubmit}>
-            <label className="field">
-              <span>Full name</span>
-              <input
-                autoComplete="name"
-                name="name"
-                placeholder="e.g. Alex Morgan"
-                required
-                type="text"
-              />
-            </label>
-
-            <label className="field">
-              <span>Email address</span>
-              <input
-                autoComplete="email"
-                name="email"
-                placeholder="you@example.com"
-                required
-                type="email"
-              />
-            </label>
-
-            <div className="field">
-              <label htmlFor="password">Password</label>
-              <span className="password-input">
-                <input
-                  autoComplete="new-password"
-                  id="password"
-                  minLength={12}
-                  name="password"
-                  onChange={handlePasswordChange}
-                  placeholder="At least 12 characters"
-                  required
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                />
-                <button
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  className="visibility-button"
-                  onClick={() => setShowPassword((visible) => !visible)}
-                  type="button"
-                >
-                  <EyeIcon visible={showPassword} />
-                </button>
-              </span>
-              <small className="field-hint">
-                Use at least 12 characters for a stronger password.
-              </small>
-            </div>
-
-            <div className="field">
-              <label htmlFor="confirm-password">Confirm password</label>
-              <span className="password-input">
-                <input
-                  autoComplete="new-password"
-                  id="confirm-password"
-                  name="confirmPassword"
-                  onChange={handleConfirmPasswordChange}
-                  placeholder="Enter your password again"
-                  required
-                  ref={confirmPasswordInput}
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  value={confirmPassword}
-                />
-                <button
-                  aria-label={
-                    showConfirmPassword
-                      ? 'Hide confirmation password'
-                      : 'Show confirmation password'
-                  }
-                  className="visibility-button"
-                  onClick={() =>
-                    setShowConfirmPassword((visible) => !visible)
-                  }
-                  type="button"
-                >
-                  <EyeIcon visible={showConfirmPassword} />
-                </button>
-              </span>
-            </div>
-
-            <label className="terms-field">
-              <input name="terms" required type="checkbox" />
-              <span>
-                I understand this prototype does not create an account or store
-                my information.
-              </span>
-            </label>
-
-            <button className="submit-button" type="submit">
-              Create account
-              <ArrowIcon />
+          <div className="auth-switch" role="tablist" aria-label="Authentication mode">
+            <button
+              type="button"
+              className={mode === 'login' ? 'is-active' : ''}
+              onClick={() => handleModeChange('login')}
+            >
+              Sign in
             </button>
+            <button
+              type="button"
+              className={mode === 'register' ? 'is-active' : ''}
+              onClick={() => handleModeChange('register')}
+            >
+              Register
+            </button>
+          </div>
 
-            {submissionMessage && (
-              <p aria-live="polite" className="form-message" role="status">
-                {submissionMessage}
+          {mode === 'login' ? (
+            <form className="signup-form" onSubmit={handleLoginSubmit}>
+              <label className="field">
+                <span>Email address</span>
+                <input
+                  autoComplete="email"
+                  name="email"
+                  onChange={(event) =>
+                    setLoginForm((current) => ({
+                      ...current,
+                      email: event.target.value,
+                    }))
+                  }
+                  placeholder="you@example.com"
+                  required
+                  type="email"
+                  value={loginForm.email}
+                />
+              </label>
+
+              <div className="field">
+                <label htmlFor="login-password">Password</label>
+                <span className="password-input">
+                  <input
+                    autoComplete="current-password"
+                    id="login-password"
+                    name="password"
+                    onChange={(event) =>
+                      setLoginForm((current) => ({
+                        ...current,
+                        password: event.target.value,
+                      }))
+                    }
+                    placeholder="Enter your password"
+                    required
+                    type={showPassword ? 'text' : 'password'}
+                    value={loginForm.password}
+                  />
+                  <button
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    className="visibility-button"
+                    onClick={() => setShowPassword((visible) => !visible)}
+                    type="button"
+                  >
+                    <EyeIcon visible={showPassword} />
+                  </button>
+                </span>
+              </div>
+
+              <div className="login-row">
+                <label className="remember-me">
+                  <input
+                    checked={loginForm.rememberMe}
+                    onChange={(event) =>
+                      setLoginForm((current) => ({
+                        ...current,
+                        rememberMe: event.target.checked,
+                      }))
+                    }
+                    type="checkbox"
+                  />
+                  <span>Remember me</span>
+                </label>
+                <button className="text-link" type="button">
+                  Forgot password?
+                </button>
+              </div>
+
+              <button className="submit-button" type="submit">
+                Sign in
+                <ArrowIcon />
+              </button>
+
+              {submissionMessage && (
+                <p aria-live="polite" className="form-message" role="status">
+                  {submissionMessage}
+                </p>
+              )}
+
+              <p className="sign-in-prompt">
+                Need an account?{' '}
+                <button className="text-link inline-link" onClick={() => handleModeChange('register')} type="button">
+                  Create one
+                </button>
               </p>
-            )}
-          </form>
+            </form>
+          ) : (
+            <form className="signup-form" onSubmit={handleRegisterSubmit}>
+              <label className="field">
+                <span>Full name</span>
+                <input
+                  autoComplete="name"
+                  name="fullName"
+                  onChange={(event) =>
+                    setRegisterForm((current) => ({
+                      ...current,
+                      fullName: event.target.value,
+                    }))
+                  }
+                  placeholder="e.g. Alex Morgan"
+                  required
+                  type="text"
+                  value={registerForm.fullName}
+                />
+              </label>
+
+              <label className="field">
+                <span>Email address</span>
+                <input
+                  autoComplete="email"
+                  name="email"
+                  onChange={(event) =>
+                    setRegisterForm((current) => ({
+                      ...current,
+                      email: event.target.value,
+                    }))
+                  }
+                  placeholder="you@example.com"
+                  required
+                  type="email"
+                  value={registerForm.email}
+                />
+              </label>
+
+              <div className="field">
+                <label htmlFor="register-password">Password</label>
+                <span className="password-input">
+                  <input
+                    autoComplete="new-password"
+                    id="register-password"
+                    minLength={12}
+                    name="password"
+                    onChange={(event) =>
+                      setRegisterForm((current) => ({
+                        ...current,
+                        password: event.target.value,
+                      }))
+                    }
+                    placeholder="At least 12 characters"
+                    required
+                    type={showPassword ? 'text' : 'password'}
+                    value={registerForm.password}
+                  />
+                  <button
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    className="visibility-button"
+                    onClick={() => setShowPassword((visible) => !visible)}
+                    type="button"
+                  >
+                    <EyeIcon visible={showPassword} />
+                  </button>
+                </span>
+                {registerForm.password && (
+                  <div className="password-strength" aria-live="polite">
+                    <span className={`strength-bar ${passwordStrength.className}`} />
+                    <small>
+                      Password strength: {passwordStrength.label || '—'}
+                    </small>
+                  </div>
+                )}
+              </div>
+
+              <div className="field">
+                <label htmlFor="register-confirm-password">Confirm password</label>
+                <span className="password-input">
+                  <input
+                    autoComplete="new-password"
+                    id="register-confirm-password"
+                    name="confirmPassword"
+                    onChange={(event) =>
+                      setRegisterForm((current) => ({
+                        ...current,
+                        confirmPassword: event.target.value,
+                      }))
+                    }
+                    placeholder="Enter your password again"
+                    required
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={registerForm.confirmPassword}
+                  />
+                  <button
+                    aria-label={
+                      showConfirmPassword
+                        ? 'Hide confirmation password'
+                        : 'Show confirmation password'
+                    }
+                    className="visibility-button"
+                    onClick={() =>
+                      setShowConfirmPassword((visible) => !visible)
+                    }
+                    type="button"
+                  >
+                    <EyeIcon visible={showConfirmPassword} />
+                  </button>
+                </span>
+                {registerForm.confirmPassword && (
+                  <small
+                    className={
+                      registerForm.password === registerForm.confirmPassword
+                        ? 'field-hint success-hint'
+                        : 'field-hint error-hint'
+                    }
+                  >
+                    {registerForm.password === registerForm.confirmPassword
+                      ? 'Passwords match.'
+                      : 'Passwords do not match.'}
+                  </small>
+                )}
+              </div>
+
+              <label className="terms-field">
+                <input
+                  checked={registerForm.agreeTerms}
+                  onChange={(event) =>
+                    setRegisterForm((current) => ({
+                      ...current,
+                      agreeTerms: event.target.checked,
+                    }))
+                  }
+                  name="terms"
+                  required
+                  type="checkbox"
+                />
+                <span>
+                  I understand this prototype does not create an account or store
+                  my information.
+                </span>
+              </label>
+
+              <button className="submit-button" type="submit">
+                Create account
+                <ArrowIcon />
+              </button>
+
+              {submissionMessage && (
+                <p aria-live="polite" className="form-message" role="status">
+                  {submissionMessage}
+                </p>
+              )}
+
+              <p className="sign-in-prompt">
+                Already registered?{' '}
+                <button className="text-link inline-link" onClick={() => handleModeChange('login')} type="button">
+                  Sign in
+                </button>
+              </p>
+            </form>
+          )}
 
           <div className="security-note">
             <ShieldIcon />
@@ -264,10 +503,6 @@ function App() {
               </span>
             </p>
           </div>
-
-          <p className="sign-in-prompt">
-            This is the first step in building BalanceVault.
-          </p>
         </div>
 
         <footer className="form-footer">
