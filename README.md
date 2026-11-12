@@ -51,6 +51,12 @@ test runner rejects other database names and non-local hosts. Apply the existing
 migrations to that dedicated database before running `npm run test:integration`.
 Run frontend checks with `npm run lint` and `npm run build`.
 
+## Security and AI-use notes
+
+See [THREATS.md](./THREATS.md) for the code-based threat model and its test
+evidence, and [PROMPTS.md](./PROMPTS.md) for the AI-use disclosure and
+representative prompt record.
+
 ## Validation
 
 Run backend tests with `npm test` from `backend`, and frontend checks with
