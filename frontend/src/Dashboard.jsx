@@ -401,12 +401,17 @@ function Dashboard({ currentUser, onLogout }) {
                   const outgoing = ownAccounts.some(
                     (account) => account.accountNumber === transaction.sourceAccount?.accountNumber,
                   )
+                  const formattedAmount = formatCurrency(
+                    transaction.amount,
+                    transaction.currency,
+                  )
                   const signedAmount =
-                    transaction.type === 'TRANSFER' && outgoing
-                      ? `-${formatCurrency(transaction.amount, transaction.currency)}`
+                    transaction.type === 'WITHDRAWAL' ||
+                    (transaction.type === 'TRANSFER' && outgoing)
+                      ? `-${formattedAmount}`
                       : transaction.type === 'TRANSFER' || transaction.type === 'DEPOSIT'
-                        ? `+${formatCurrency(transaction.amount, transaction.currency)}`
-                        : formatCurrency(transaction.amount, transaction.currency)
+                        ? `+${formattedAmount}`
+                        : formattedAmount
 
                   return (
                     <li key={transaction.id}>
@@ -491,11 +496,11 @@ function Dashboard({ currentUser, onLogout }) {
                     <div>
                       <strong>{account.owner?.fullName || 'Unassigned system account'}</strong>
                       <span>
-                        {account.type} · {account.accountNumber} ·{' '}
+                        {account.type === 'SYSTEM' ? 'System clearing' : account.type} · {account.accountNumber} ·{' '}
                         {formatCurrency(account.balance, account.currency)} · {account.status}
                       </span>
                     </div>
-                    {account.status === 'ACTIVE' && (
+                    {account.status === 'ACTIVE' && account.type !== 'SYSTEM' && (
                       <div className="admin-deposit">
                         <input
                           aria-label={`Simulated amount for ${account.accountNumber}`}

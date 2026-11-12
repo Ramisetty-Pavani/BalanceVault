@@ -12,6 +12,7 @@ import {
   verifySessionToken,
 } from './auth-security.js'
 import { decimalToUnits, parseMoney, unitsToDecimal } from './money.js'
+import { getSystemAccount } from './system-account.js'
 
 dotenv.config()
 
@@ -134,7 +135,7 @@ function publicUser(user) {
 function setSessionCookie(res, token, maxAge) {
   const attributes = [
     `${sessionCookieName}=${token}`,
-    'Path=/api/auth',
+    'Path=/api',
     'HttpOnly',
     'SameSite=Strict',
     `Max-Age=${maxAge}`,
@@ -150,7 +151,7 @@ function setSessionCookie(res, token, maxAge) {
 function clearSessionCookie(res) {
   const attributes = [
     `${sessionCookieName}=`,
-    'Path=/api/auth',
+    'Path=/api',
     'HttpOnly',
     'SameSite=Strict',
     'Max-Age=0',
@@ -197,6 +198,32 @@ function getIdempotencyKey(req) {
 
 function hashRequest(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex')
+}
+
+async function assertBalancedLedger(tx, transactionId) {
+  const entries = await tx.ledgerEntry.findMany({
+    where: { transactionId },
+    select: { type: true, amount: true },
+  })
+
+  let debits = 0n
+  let credits = 0n
+  for (const entry of entries) {
+    const amountUnits = decimalToUnits(entry.amount)
+    if (amountUnits <= 0n) {
+      throw httpError(500, 'Transaction ledger posting failed.')
+    }
+
+    if (entry.type === 'DEBIT') {
+      debits += amountUnits
+    } else {
+      credits += amountUnits
+    }
+  }
+
+  if (entries.length < 2 || debits === 0n || debits !== credits) {
+    throw httpError(500, 'Transaction ledger posting failed.')
+  }
 }
 
 function createAccountNumber() {
@@ -741,6 +768,7 @@ app.post('/api/transactions/transfers', requireAuth, transferLimiter, async (req
           },
         ],
       })
+      await assertBalancedLedger(tx, transaction.id)
       await tx.idempotencyKey.create({
         data: {
           userId: req.authUser.id,
@@ -758,6 +786,154 @@ app.post('/api/transactions/transfers', requireAuth, transferLimiter, async (req
           targetId: transaction.id,
           outcome: 'SUCCESS',
           metadata: { amount, currency: source.currency },
+        },
+      })
+
+      return { transaction, replayed: false }
+    },
+    { isolationLevel: 'Serializable' },
+  )
+
+  return res.status(result.replayed ? 200 : 201).json(result)
+})
+
+app.post('/api/transactions/withdrawals', requireAuth, transferLimiter, async (req, res) => {
+  if (req.authUser.role !== 'ACCOUNT_HOLDER') {
+    return res.status(403).json({ message: 'Account holder access required.' })
+  }
+
+  const accountNumber =
+    typeof req.body?.accountNumber === 'string' ? req.body.accountNumber.trim() : ''
+  const amountUnits = parseMoney(req.body?.amount)
+  const idempotencyKey = getIdempotencyKey(req)
+
+  if (!/^\d{16}$/.test(accountNumber) || !amountUnits || !idempotencyKey) {
+    return res.status(400).json({
+      message: 'Provide a valid 16-digit account number, an amount up to $10,000, and an Idempotency-Key header.',
+    })
+  }
+
+  const requestHash = hashRequest({
+    kind: 'simulated-withdrawal',
+    accountNumber,
+    amount: amountUnits.toString(),
+  })
+  const amount = unitsToDecimal(amountUnits)
+
+  const result = await prisma.$transaction(
+    async (tx) => {
+      const previous = await findIdempotentTransaction(
+        tx,
+        req.authUser.id,
+        idempotencyKey,
+        requestHash,
+      )
+      if (previous) {
+        return { transaction: previous, replayed: true }
+      }
+
+      const account = await tx.account.findUnique({
+        where: { accountNumber },
+        select: {
+          id: true,
+          userId: true,
+          type: true,
+          status: true,
+          currency: true,
+          balance: true,
+        },
+      })
+      if (
+        !account ||
+        account.userId !== req.authUser.id ||
+        account.type === 'SYSTEM' ||
+        account.status !== 'ACTIVE'
+      ) {
+        throw httpError(404, 'Active account not found.')
+      }
+
+      if (decimalToUnits(account.balance) < amountUnits) {
+        throw httpError(400, 'The account has insufficient funds.')
+      }
+
+      const systemAccount = await getSystemAccount(tx, account.currency)
+      const debit = await tx.account.updateMany({
+        where: {
+          id: account.id,
+          userId: req.authUser.id,
+          type: { not: 'SYSTEM' },
+          status: 'ACTIVE',
+          balance: { gte: amount },
+        },
+        data: { balance: { decrement: amount } },
+      })
+      if (debit.count !== 1) {
+        throw httpError(409, 'The account balance changed. Refresh and retry.')
+      }
+
+      const creditSystem = await tx.account.updateMany({
+        where: {
+          id: systemAccount.id,
+          type: 'SYSTEM',
+          userId: null,
+          status: 'ACTIVE',
+          currency: account.currency,
+          balance: { gte: amount },
+        },
+        data: { balance: { decrement: amount } },
+      })
+      if (creditSystem.count !== 1) {
+        throw httpError(409, 'The system clearing balance is insufficient.')
+      }
+
+      const transaction = await tx.transaction.create({
+        data: {
+          type: 'WITHDRAWAL',
+          status: 'COMPLETED',
+          amount,
+          currency: account.currency,
+          sourceAccountId: account.id,
+          initiatedById: req.authUser.id,
+          description: 'Simulated withdrawal',
+          completedAt: new Date(),
+        },
+        select: transactionSelect,
+      })
+
+      await tx.ledgerEntry.createMany({
+        data: [
+          {
+            transactionId: transaction.id,
+            accountId: account.id,
+            type: 'DEBIT',
+            amount,
+          },
+          {
+            transactionId: transaction.id,
+            accountId: systemAccount.id,
+            type: 'CREDIT',
+            amount,
+          },
+        ],
+      })
+      await assertBalancedLedger(tx, transaction.id)
+      await tx.idempotencyKey.create({
+        data: {
+          userId: req.authUser.id,
+          key: idempotencyKey,
+          requestHash,
+          transactionId: transaction.id,
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        },
+      })
+      await tx.auditLog.create({
+        data: {
+          actorId: req.authUser.id,
+          action: 'WITHDRAWAL_COMPLETED',
+          targetType: 'Transaction',
+          targetId: transaction.id,
+          outcome: 'SUCCESS',
+          metadata: { accountId: account.id, amount, currency: account.currency },
         },
       })
 
@@ -799,16 +975,46 @@ app.post('/api/admin/accounts/:accountId/deposits', requireAdmin, async (req, re
 
       const account = await tx.account.findUnique({
         where: { id: req.params.accountId },
-        select: { id: true, status: true, currency: true },
+        select: { id: true, userId: true, type: true, status: true, currency: true },
       })
-      if (!account || account.status !== 'ACTIVE') {
+      if (
+        !account ||
+        !account.userId ||
+        account.type === 'SYSTEM' ||
+        account.status !== 'ACTIVE'
+      ) {
         throw httpError(404, 'Active account not found.')
       }
 
-      await tx.account.update({
-        where: { id: account.id },
+      const systemAccount = await getSystemAccount(tx, account.currency)
+      const credit = await tx.account.updateMany({
+        where: {
+          id: account.id,
+          userId: account.userId,
+          type: { not: 'SYSTEM' },
+          status: 'ACTIVE',
+          currency: account.currency,
+        },
         data: { balance: { increment: amount } },
       })
+      if (credit.count !== 1) {
+        throw httpError(409, 'The account changed. Refresh and retry.')
+      }
+
+      const debitSystem = await tx.account.updateMany({
+        where: {
+          id: systemAccount.id,
+          type: 'SYSTEM',
+          userId: null,
+          status: 'ACTIVE',
+          currency: account.currency,
+        },
+        data: { balance: { increment: amount } },
+      })
+      if (debitSystem.count !== 1) {
+        throw httpError(409, 'The system clearing account changed.')
+      }
+
       const transaction = await tx.transaction.create({
         data: {
           type: 'DEPOSIT',
@@ -823,14 +1029,23 @@ app.post('/api/admin/accounts/:accountId/deposits', requireAdmin, async (req, re
         select: transactionSelect,
       })
 
-      await tx.ledgerEntry.create({
-        data: {
-          transactionId: transaction.id,
-          accountId: account.id,
-          type: 'CREDIT',
-          amount,
-        },
+      await tx.ledgerEntry.createMany({
+        data: [
+          {
+            transactionId: transaction.id,
+            accountId: systemAccount.id,
+            type: 'DEBIT',
+            amount,
+          },
+          {
+            transactionId: transaction.id,
+            accountId: account.id,
+            type: 'CREDIT',
+            amount,
+          },
+        ],
       })
+      await assertBalancedLedger(tx, transaction.id)
       await tx.idempotencyKey.create({
         data: {
           userId: req.authUser.id,
@@ -983,7 +1198,11 @@ async function start() {
   process.once('SIGTERM', shutdown)
 }
 
-start().catch((error) => {
-  logError(error)
-  process.exitCode = 1
-})
+if (process.env.NODE_ENV !== 'test') {
+  start().catch((error) => {
+    logError(error)
+    process.exitCode = 1
+  })
+}
+
+export { app, prisma }

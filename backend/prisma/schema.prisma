@@ -152,7 +152,7 @@ model AuditLog {
   outcome    String   @db.VarChar(40)
   metadata   Json?
   createdAt  DateTime @default(now())
-  actor      User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actor      User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: Restrict)
 
   @@index([actorId, createdAt])
   @@index([action, createdAt])

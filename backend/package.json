@@ -14,7 +14,9 @@
     "dev": "nodemon server.js",
     "preadmin:promote": "prisma generate",
     "admin:promote": "node scripts/promote-admin.js",
-    "test": "node --test"
+    "seed:system-account": "prisma generate && node scripts/ensure-system-account.js",
+    "test": "node --test test/auth-security.test.js test/money.test.js",
+    "test:integration": "node --test test/transactions.integration.test.js"
   },
   "keywords": [],
   "author": "",
