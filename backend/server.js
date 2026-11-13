@@ -50,7 +50,9 @@ const prisma = new PrismaClient({
     user: decodeURIComponent(databaseUrl.username),
     password: decodeURIComponent(databaseUrl.password),
     database: databaseUrl.pathname.slice(1),
-    ssl: true,
+    ssl: {
+  servername: databaseUrl.hostname,
+},
     connectionLimit: 5,
   }),
 })
