@@ -1,3 +1,4 @@
+
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
@@ -34,8 +35,19 @@ if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL must be configured.')
 }
 
+// Configure the MariaDB adapter with TLS enabled.
+const databaseUrl = new URL(process.env.DATABASE_URL)
+
 const prisma = new PrismaClient({
-  adapter: new PrismaMariaDb(process.env.DATABASE_URL),
+  adapter: new PrismaMariaDb({
+    host: databaseUrl.hostname,
+    port: Number(databaseUrl.port || 3306),
+    user: decodeURIComponent(databaseUrl.username),
+    password: decodeURIComponent(databaseUrl.password),
+    database: databaseUrl.pathname.slice(1),
+    ssl: true,
+    connectionLimit: 5,
+  }),
 })
 
 app.use(
