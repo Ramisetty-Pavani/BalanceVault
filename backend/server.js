@@ -18,6 +18,7 @@ import { getSystemAccount } from './system-account.js'
 dotenv.config()
 
 const app = express()
+app.set('trust proxy', 1)
 const port = Number(process.env.PORT) || 4000
 const sessionSecret = process.env.JWT_SECRET
 const isProduction = process.env.NODE_ENV === 'production'
