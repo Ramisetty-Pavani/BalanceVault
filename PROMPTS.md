@@ -2,13 +2,14 @@
 
 **Project:** BalanceVault – Money Movement with a Ledger You Can Prove
 
-**AI Tool Used:** GitHub Copilot in VS Code (Copilot SDK)
+**AI Tools Used:** GitHub Copilot in VS Code (Copilot SDK) and ChatGPT
 
 This document records the major instructions, prompts, review decisions, errors, and corrections during the development of BalanceVault. The prompts are summarized for readability and are not a complete conversation transcript.
 
 ## 1. Representative Prompts and Instructions
 
 ### 1.1 Inspect the Existing Project Before Making Changes
+
 I instructed GitHub Copilot to inspect the existing backend server, Prisma schema, database migrations, transaction logic, money-handling utilities, and tests before making changes.
 
 The instructions were to:
@@ -18,6 +19,7 @@ The instructions were to:
 - Preserve the existing money transfer functionality.
 
 ### 1.2 Implement Simulated Banking Transactions
+
 I requested implementation of secure simulated deposit and withdrawal functionality.
 
 The requirements included:
@@ -32,6 +34,7 @@ The requirements included:
 Real banking networks and actual money transfers were explicitly outside the project scope.
 
 ### 1.3 Isolate Database Testing
+
 I instructed Copilot to use a separate local test database named `balancevault_test_db`.
 
 The requirements included:
@@ -41,6 +44,7 @@ The requirements included:
 - Verify migrations and test data only in the isolated test environment.
 
 ### 1.4 Improve Ledger and Audit Record Protection
+
 During security review, I selected the ledger and audit immutability issue for correction.
 
 Copilot implemented:
@@ -49,15 +53,27 @@ Copilot implemented:
 - Integration tests to verify these protections.
 
 ### 1.5 Review Changes Before Publishing to GitHub
+
 Before publishing, I instructed Copilot to:
 - Inspect the Git status and review all changes.
 - Stage only the intended application files.
 - Exclude `.env`, credentials, generated files, and unrelated files.
 - Review the staged changes before committing.
 - Push only to the existing branch `feature/simulated-banking-mvp`.
-- Update the existing pull request without merging or deploying.
+- Update the existing pull request without merging.
 
 I authorized the commit and push after reviewing the staged file list and checks.
+
+### 1.6 Debug Deployment and Session Authentication
+
+During deployment, I used ChatGPT and development tools to investigate database connection and browser authentication issues.
+
+The work included:
+- Investigating a hosted database connection error and correcting the database TLS server-name configuration.
+- Reviewing frontend credential handling and backend CORS configuration.
+- Correcting the session-cookie path so that authenticated API routes receive the cookie.
+- Updating the production cookie configuration to use `SameSite=None` with `Secure`, while retaining `SameSite=Strict` for local development.
+- Running available tests and deploying the changes.
 
 ## 2. Errors and Corrections
 
@@ -68,6 +84,10 @@ I authorized the commit and push after reviewing the staged file list and checks
 3. **Withdrawal role validation:** Review identified that authentication and account ownership checks alone did not explicitly prevent an ADMIN from using the withdrawal endpoint. An explicit `ACCOUNT_HOLDER` role check and a corresponding integration test were added.
 
 4. **Concurrency test improvement:** A tautological assertion was removed. The test now checks meaningful outcomes: one concurrent withdrawal succeeds, the other is rejected, balances remain correct, and only one withdrawal is recorded.
+
+5. **Hosted database connection:** A database connection error was investigated during deployment. The database TLS server-name configuration was corrected.
+
+6. **Production session cookie:** The production session-cookie configuration was updated to use `SameSite=None` with `Secure`. The application was redeployed, and the authenticated dashboard was subsequently accessible.
 
 ## 3. Testing and Verification
 
@@ -83,22 +103,30 @@ The following local verification results were recorded:
 
 Integration tests were performed using the dedicated local test database.
 
-These results do not represent a production deployment, external penetration test, or complete security audit.
+The deployed frontend and backend were also checked. The authenticated dashboard was accessible after the production session-cookie correction.
 
-## 4. GitHub Publishing Details
+These results do not represent an external penetration test, a complete security audit, or verification of every application workflow in production.
+
+## 4. GitHub Publishing and Deployment Details
 
 - **Repository:** https://github.com/Ramisetty-Pavani/BalanceVault
 - **Branch:** `feature/simulated-banking-mvp`
-- **Commit message:** `feat: complete simulated banking transactions and ledger protections`
 - **Pull Request:** https://github.com/Ramisetty-Pavani/BalanceVault/pull/1
-- **Status:** Changes pushed successfully; pull request remains open and unmerged.
-- **Deployment:** Not performed.
+- **Deployment platform:** Render
+- **Frontend:** https://balancevault-frontend-p4k7.onrender.com
+- **Backend:** https://balancevault-backend-1n8h.onrender.com
+
+The changes were pushed to the existing feature branch. The pull request was created for review. Its current status should be checked on GitHub before submission.
+
+The application has been deployed to Render. Deployment does not mean that every feature has been fully verified in the hosted environment.
 
 ## 5. AI Usage Disclosure
 
 GitHub Copilot was used as an AI-assisted development tool for code inspection, implementation assistance, debugging, test creation, and security review.
 
-I provided the requirements, reviewed proposed changes, made implementation and security decisions, and verified the reported test results. The implementation details and testing outcomes should be understood in the context of this AI-assisted workflow.
+ChatGPT was also used for development guidance, troubleshooting, understanding implementation decisions, and documentation assistance.
+
+I provided the requirements, reviewed proposed changes, made implementation and security decisions, and ran the reported checks. AI-generated suggestions were reviewed and tested as part of the development process.
 
 Before submitting this project, I will review the implementation and ensure that I can explain the important design decisions, transaction logic, database protections, and tests.
 

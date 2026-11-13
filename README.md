@@ -1,67 +1,99 @@
 # BalanceVault
 
-BalanceVault is a simulated banking MVP for learning and demonstration. It does
-not connect to real banks, payment networks, or KYC/AML providers and must not
-be used to hold or move real money.
+BalanceVault is a simulated banking application developed for learning and demonstration. It allows users to manage account requests, view account information, and perform simulated money movements through a digital ledger.
+
+**Live Website:** https://balancevault-frontend-p4k7.onrender.com
+
+**GitHub Repository:** https://github.com/Ramisetty-Pavani/BalanceVault
+
+## Technologies Used
+
+- Frontend: React, Vite, JavaScript
+- Backend: Node.js, Express.js
+- Database: MySQL / MariaDB
+- ORM: Prisma
+- Authentication: Password hashing and HttpOnly session cookies
+- Deployment: Render
 
 ## Features
 
-- Account registration and login with hashed passwords and HttpOnly sessions
-- Checking and savings account requests with administrator approval
-- Account dashboard and transaction history
-- Internal transfers with decimal-safe amounts, double-entry ledger records,
-  audit events, and idempotency keys
-- Simulated withdrawals from the account holder's own active account
-- Administrator-only simulated demo funding and onboarding review
-- Balanced double-entry postings between customer accounts and a system clearing account
+- User registration and login with hashed passwords and secure sessions.
+- Checking and savings account requests with administrator approval.
+- Account dashboard and transaction history.
+- Internal transfers and simulated withdrawals.
+- Administrator-only simulated funding and account approval.
+- Double-entry ledger records and audit events.
 
-## Local setup
+## Development Status
 
-Requirements: Node.js 22.18 or newer and a MySQL-compatible database.
+The frontend and backend are deployed on Render. User login and the account dashboard are working.
+
+Some features, including administrator approval, money transfers, and transaction verification, are still being tested and improved.
+
+All banking operations are simulated. The application does not connect to real banks or payment networks and must not be used to handle real money.
+
+## Local Setup
+
+**Requirements:** Node.js 22.18 or newer and a MySQL-compatible database.
 
 1. Copy `backend/.env.example` to `backend/.env`.
-2. Set `DATABASE_URL` to your MySQL connection string and replace `JWT_SECRET`
-   with at least 32 cryptographically random bytes.
-3. In `backend`, run `npm ci`, then `npx prisma migrate deploy`. On a new,
-   empty database, run `npm run seed:system-account` before creating accounts.
-   The seed command refuses to create a clearing account when financial records
-   already exist and never reconciles or deletes existing data.
-4. Start the backend with `npm run dev`.
-5. In `frontend`, run `npm ci`, then `npm run dev`. The frontend defaults to the
-   API at `http://localhost:4000`; set `VITE_API_URL` if it is hosted elsewhere.
+2. Configure `DATABASE_URL` and a secure `JWT_SECRET` of at least 32 cryptographically random bytes.
+3. Open the `backend` folder and run:
 
-Create an ordinary user through the registration page, then promote that user
-to administrator from `backend`:
+```bash
+npm ci
+npx prisma migrate deploy
+```
+
+4. On a new, empty database, initialize the system account:
+
+```bash
+npm run seed:system-account
+```
+
+5. Start the backend:
+
+```bash
+npm run dev
+```
+
+6. Open another terminal, navigate to `frontend`, and run:
+
+```bash
+npm ci
+npm run dev
+```
+
+The frontend defaults to `http://localhost:4000` for the API. Set `VITE_API_URL` if the backend is hosted elsewhere.
+
+To create an administrator, first register an ordinary user, then run this command from the backend folder:
 
 ```powershell
 npm run admin:promote -- user@example.com
 ```
 
-Only administrators can approve or reject account requests and add simulated
-demo funds. Account requests create pending accounts; approved accounts become
-active. Transfers and withdrawals require active accounts and are limited to
-$10,000 per transaction. All deposits, withdrawals, and transfers are simulated;
-no real funds or payment networks are involved.
-
 ## Tests
 
-Run backend unit tests with `npm test`. Integration tests require
-`TEST_DATABASE_URL` to target the local `balancevault_test_db` database; the
-test runner rejects other database names and non-local hosts. Apply the existing
-migrations to that dedicated database before running `npm run test:integration`.
-Run frontend checks with `npm run lint` and `npm run build`.
+Run backend unit tests from the `backend` folder:
 
-## Security and AI-use notes
+```bash
+npm test
+```
 
-See [THREATS.md](./THREATS.md) for the code-based threat model and its test
-evidence, and [PROMPTS.md](./PROMPTS.md) for the AI-use disclosure and
-representative prompt record.
+Integration tests require `TEST_DATABASE_URL` to point to the dedicated local `balancevault_test_db` database. Apply migrations before running:
 
-## Validation
+```bash
+npm run test:integration
+```
 
-Run backend tests with `npm test` from `backend`, and frontend checks with
-`npm run lint` and `npm run build` from `frontend`.
+Run frontend checks from the `frontend` folder:
 
-Render deployment is intentionally separate from this local setup. The current
-schema uses MySQL; Render deployment will require an externally hosted MySQL
-database and its connection URL configured as a secret environment variable.
+```bash
+npm run lint
+npm run build
+```
+
+## Documentation
+
+- [Threat Model](./THREATS.md)
+- [AI Use and Prompt Record](./PROMPTS.md)
