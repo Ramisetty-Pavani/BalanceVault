@@ -37,7 +37,12 @@ if (!process.env.DATABASE_URL) {
 
 // Configure the MariaDB adapter with TLS enabled.
 const databaseUrl = new URL(process.env.DATABASE_URL)
-
+console.log('Database configuration check:', {
+  databaseUrlPresent: Boolean(process.env.DATABASE_URL),
+  hostname: databaseUrl.hostname,
+  port: databaseUrl.port,
+  database: databaseUrl.pathname.slice(1),
+})
 const prisma = new PrismaClient({
   adapter: new PrismaMariaDb({
     host: databaseUrl.hostname,
