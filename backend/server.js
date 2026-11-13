@@ -196,6 +196,14 @@ function logError(error) {
     name: error && error.name,
     code: error && error.code,
     statusCode: error && error.statusCode,
+    message: error && error.message,
+    meta: error && error.meta,
+    cause: error && error.cause
+      ? {
+          code: error.cause.code,
+          message: error.cause.message,
+        }
+      : undefined,
   })
 }
 
