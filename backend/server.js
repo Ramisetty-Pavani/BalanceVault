@@ -205,6 +205,9 @@ function logError(error) {
         }
       : undefined,
   })
+  console.dir(error && error.meta && error.meta.driverAdapterError, {
+  depth: null,
+})
 }
 
 function httpError(statusCode, message) {
