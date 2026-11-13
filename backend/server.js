@@ -156,7 +156,7 @@ function setSessionCookie(res, token, maxAge) {
     `${sessionCookieName}=${token}`,
     'Path=/api',
     'HttpOnly',
-    'SameSite=Strict',
+    isProduction ? 'SameSite=None' : 'SameSite=Strict',
     `Max-Age=${maxAge}`,
   ]
 
@@ -172,7 +172,7 @@ function clearSessionCookie(res) {
     `${sessionCookieName}=`,
     'Path=/api',
     'HttpOnly',
-    'SameSite=Strict',
+    isProduction ? 'SameSite=None' : 'SameSite=Strict',
     'Max-Age=0',
     'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
   ]
@@ -1236,3 +1236,4 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 export { app, prisma }
+
