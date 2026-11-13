@@ -1,5 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import Dashboard from './Dashboard'
 import './App.css'
+
+const API_BASE_URL = (import.meta.env.VITE_API_URL || 'https://balancevault-backend-1n8h.onrender.com').replace(/\/$/, '')
 
 function ShieldIcon() {
   return (
@@ -64,6 +67,9 @@ function App() {
   const [mode, setMode] = useState('login')
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [currentUser, setCurrentUser] = useState(null)
+  const [isCheckingSession, setIsCheckingSession] = useState(true)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [loginForm, setLoginForm] = useState({
     email: '',
     password: '',
@@ -83,7 +89,75 @@ function App() {
     [registerForm.password],
   )
 
-  function handleLoginSubmit(event) {
+  useEffect(() => {
+    let active = true
+
+    async function loadSession() {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+          credentials: 'include',
+        })
+
+        if (response.status === 401) {
+          return
+        }
+
+        const result = await response.json()
+        if (!response.ok) {
+          throw new Error(result.message || 'Unable to check your sign-in status.')
+        }
+
+        if (active) {
+          setCurrentUser(result.user)
+        }
+      } catch {
+        if (active) {
+          setSubmissionMessage('Unable to connect to BalanceVault. Please try again.')
+        }
+      } finally {
+        if (active) {
+          setIsCheckingSession(false)
+        }
+      }
+    }
+
+    loadSession()
+    return () => {
+      active = false
+    }
+  }, [])
+
+  async function submitAuthRequest(path, payload, successMessage) {
+    setIsSubmitting(true)
+    setSubmissionMessage('')
+
+    try {
+      const response = await fetch(`${API_BASE_URL}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      })
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.message || 'Unable to complete your request.')
+      }
+
+      setCurrentUser(result.user)
+      setSubmissionMessage(successMessage)
+    } catch (error) {
+      setSubmissionMessage(
+        error instanceof Error
+          ? error.message
+          : 'Unable to connect to BalanceVault. Please try again.',
+      )
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  async function handleLoginSubmit(event) {
     event.preventDefault()
 
     if (!loginForm.email || !loginForm.password) {
@@ -96,12 +170,18 @@ function App() {
       return
     }
 
-    setSubmissionMessage(
-      'Login is not connected to the backend yet. This demo only validates the form inputs.',
+    await submitAuthRequest(
+      '/api/auth/login',
+      {
+        email: loginForm.email,
+        password: loginForm.password,
+        rememberMe: loginForm.rememberMe,
+      },
+      'You are signed in.',
     )
   }
 
-  function handleRegisterSubmit(event) {
+  async function handleRegisterSubmit(event) {
     event.preventDefault()
 
     if (!registerForm.fullName.trim()) {
@@ -136,9 +216,39 @@ function App() {
       return
     }
 
-    setSubmissionMessage(
-      'Registration is not connected to a backend yet. Your information has not been sent or saved.',
+    await submitAuthRequest(
+      '/api/auth/register',
+      {
+        fullName: registerForm.fullName,
+        email: registerForm.email,
+        password: registerForm.password,
+      },
+      'Your account has been created and you are signed in.',
     )
+  }
+
+  async function handleLogout() {
+    setSubmissionMessage('')
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      if (!response.ok) {
+        throw new Error('Unable to sign out. Please try again.')
+      }
+
+      setCurrentUser(null)
+      setMode('login')
+      setSubmissionMessage('You are signed out.')
+    } catch (error) {
+      setSubmissionMessage(
+        error instanceof Error
+          ? error.message
+          : 'Unable to connect to BalanceVault. Please try again.',
+      )
+    }
   }
 
   function handleModeChange(nextMode) {
@@ -217,17 +327,27 @@ function App() {
           <span>BalanceVault</span>
         </div>
 
-        <div className="form-wrap">
-          <div className="form-heading">
-            <p className="eyebrow">YOUR FINANCIAL HOME</p>
-            <h2>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h2>
-            <p className="form-intro">
-              {mode === 'login'
-                ? 'Sign in to continue to your secure finance workspace.'
-                : 'Start with the essentials. You can finish setting up your account later.'}
-            </p>
-          </div>
+        <div className={`form-wrap${currentUser ? ' dashboard-wrap' : ''}`}>
+          {!currentUser && (
+            <div className="form-heading">
+              <p className="eyebrow">YOUR FINANCIAL HOME</p>
+              <h2>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h2>
+              <p className="form-intro">
+                {mode === 'login'
+                  ? 'Sign in to continue to your secure finance workspace.'
+                  : 'Start with the essentials. You can finish setting up your account later.'}
+              </p>
+            </div>
+          )}
 
+          {currentUser ? (
+            <Dashboard currentUser={currentUser} onLogout={handleLogout} />
+          ) : isCheckingSession ? (
+            <p aria-live="polite" className="form-message" role="status">
+              Checking your sign-in status...
+            </p>
+          ) : (
+          <>
           <div className="auth-switch" role="tablist" aria-label="Authentication mode">
             <button
               type="button"
@@ -313,7 +433,7 @@ function App() {
                 </button>
               </div>
 
-              <button className="submit-button" type="submit">
+              <button className="submit-button" disabled={isSubmitting} type="submit">
                 Sign in
                 <ArrowIcon />
               </button>
@@ -469,12 +589,11 @@ function App() {
                   type="checkbox"
                 />
                 <span>
-                  I understand this prototype does not create an account or store
-                  my information.
+                  I understand this prototype stores my account information for sign-in.
                 </span>
               </label>
 
-              <button className="submit-button" type="submit">
+              <button className="submit-button" disabled={isSubmitting} type="submit">
                 Create account
                 <ArrowIcon />
               </button>
@@ -493,13 +612,15 @@ function App() {
               </p>
             </form>
           )}
+          </>
+          )}
 
           <div className="security-note">
             <ShieldIcon />
             <p>
               <strong>Your information stays yours.</strong>
               <span>
-                This frontend prototype does not send or store form details.
+                Passwords are hashed, and sessions use HttpOnly cookies.
               </span>
             </p>
           </div>
