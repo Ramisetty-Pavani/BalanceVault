@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/$/, '')
+const API_BASE_URL = (import.meta.env.VITE_API_URL || 'https://balancevault-backend-1n8h.onrender.com').replace(/\/$/, '')
 
 async function requestApi(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {

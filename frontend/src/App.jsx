@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Dashboard from './Dashboard'
 import './App.css'
 
-const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/$/, '')
+const API_BASE_URL = (import.meta.env.VITE_API_URL || 'https://balancevault-backend-1n8h.onrender.com').replace(/\/$/, '')
 
 function ShieldIcon() {
   return (
