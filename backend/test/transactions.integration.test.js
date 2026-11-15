@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { after, before, test } from 'node:test'
+import 'dotenv/config'
 import { createSessionToken } from '../auth-security.js'
 import { decimalToUnits } from '../money.js'
 import { ensureSystemAccount } from '../system-account.js'
@@ -117,6 +118,15 @@ async function postAs(userId, path, body, idempotencyKey) {
   return { response, result: await response.json() }
 }
 
+async function getAs(userId, path) {
+  const token = createSessionToken(userId, process.env.JWT_SECRET, 3600)
+  const response = await fetch(`${baseUrl}${path}`, {
+    headers: { Cookie: `bv_session=${token}` },
+  })
+
+  return { response, result: await response.json() }
+}
+
 async function depositAs(adminId, account, amount, key = createKey()) {
   return postAs(
     adminId,
@@ -223,6 +233,56 @@ test('duplicate deposit keys replay without applying funds twice', async () => {
   assert.equal(replay.result.transaction.id, first.result.transaction.id)
   assert.equal(conflict.response.status, 409)
   assert.equal(decimalToUnits(storedAccount.balance), decimalToUnits('25.00'))
+  await assertTransactionIsBalanced(first.result.transaction.id)
+})
+
+test('an account holder can deposit into their own active account with idempotency', async () => {
+  const owner = await createUser()
+  const otherUser = await createUser()
+  const account = await createActiveAccount(owner.id)
+  const otherAccount = await createActiveAccount(otherUser.id)
+  const key = createKey()
+
+  const first = await postAs(
+    owner.id,
+    '/api/transactions/deposits',
+    { accountNumber: account.accountNumber, amount: '12.34' },
+    key,
+  )
+  const replay = await postAs(
+    owner.id,
+    '/api/transactions/deposits',
+    { accountNumber: account.accountNumber, amount: '12.34' },
+    key,
+  )
+  const unauthorized = await postAs(
+    owner.id,
+    '/api/transactions/deposits',
+    { accountNumber: otherAccount.accountNumber, amount: '1.00' },
+    createKey(),
+  )
+  const invalid = await postAs(
+    owner.id,
+    '/api/transactions/deposits',
+    { accountNumber: account.accountNumber, amount: '10000.01' },
+    createKey(),
+  )
+
+  assert.equal(first.response.status, 201)
+  assert.equal(first.result.transaction.type, 'DEPOSIT')
+  assert.equal(first.result.transaction.destinationAccount.accountNumber, account.accountNumber)
+  assert.equal(replay.response.status, 200)
+  assert.equal(replay.result.transaction.id, first.result.transaction.id)
+  assert.equal(unauthorized.response.status, 404)
+  assert.equal(invalid.response.status, 400)
+  assert.equal(
+    decimalToUnits((await prisma.account.findUnique({ where: { id: account.id } })).balance),
+    decimalToUnits('12.34'),
+  )
+  assert.equal(
+    decimalToUnits((await prisma.account.findUnique({ where: { id: otherAccount.id } })).balance),
+    0n,
+  )
   await assertTransactionIsBalanced(first.result.transaction.id)
 })
 
@@ -508,7 +568,91 @@ test('existing transfers still move funds with a balanced ledger', async () => {
 
   assert.equal(response.status, 201)
   assert.equal(result.transaction.type, 'TRANSFER')
+  assert.equal(
+    result.transaction.destinationAccount.accountNumber,
+    `****${destination.accountNumber.slice(-4)}`,
+  )
   assert.equal(decimalToUnits((await prisma.account.findUnique({ where: { id: source.id } })).balance), decimalToUnits('25.00'))
   assert.equal(decimalToUnits((await prisma.account.findUnique({ where: { id: destination.id } })).balance), decimalToUnits('15.00'))
   await assertTransactionIsBalanced(result.transaction.id)
+
+  const recipientHistory = await getAs(recipient.id, '/api/transactions')
+  const unrelatedUser = await createUser()
+  const unrelatedHistory = await getAs(unrelatedUser.id, '/api/transactions')
+  const receivedTransfer = recipientHistory.result.transactions.find(
+    (transaction) => transaction.id === result.transaction.id,
+  )
+
+  assert.equal(recipientHistory.response.status, 200)
+  assert.equal(
+    receivedTransfer.sourceAccount.accountNumber,
+    `****${source.accountNumber.slice(-4)}`,
+  )
+  assert.equal(receivedTransfer.destinationAccount.accountNumber, destination.accountNumber)
+  assert.ok(!unrelatedHistory.result.transactions.some((entry) => entry.id === result.transaction.id))
+})
+
+test('ledger verification reports missing entries without changing financial records', async () => {
+  const admin = await createUser('ADMIN')
+  const owner = await createUser()
+  const recipient = await createUser()
+  const source = await createActiveAccount(owner.id, '8.00')
+  const destination = await createActiveAccount(recipient.id, '3.00')
+  const transaction = await prisma.transaction.create({
+    data: {
+      type: 'TRANSFER',
+      status: 'COMPLETED',
+      amount: '2.00',
+      currency: 'USD',
+      sourceAccountId: source.id,
+      destinationAccountId: destination.id,
+      initiatedById: owner.id,
+      completedAt: new Date(),
+    },
+  })
+  const before = {
+    sourceBalance: decimalToUnits(source.balance),
+    destinationBalance: decimalToUnits(destination.balance),
+    transactionCount: await prisma.transaction.count(),
+    entryCount: await prisma.ledgerEntry.count(),
+  }
+
+  try {
+    const { response, result } = await getAs(admin.id, '/api/admin/ledger/verification')
+
+    assert.equal(response.status, 200)
+    assert.ok(result.issues.some((issue) => issue.transactionId === transaction.id))
+    assert.deepEqual(
+      {
+        sourceBalance: decimalToUnits(
+          (await prisma.account.findUnique({ where: { id: source.id } })).balance,
+        ),
+        destinationBalance: decimalToUnits(
+          (await prisma.account.findUnique({ where: { id: destination.id } })).balance,
+        ),
+        transactionCount: await prisma.transaction.count(),
+        entryCount: await prisma.ledgerEntry.count(),
+      },
+      before,
+    )
+  } finally {
+    await prisma.ledgerEntry.createMany({
+      data: [
+        { transactionId: transaction.id, accountId: source.id, type: 'DEBIT', amount: '2.00' },
+        {
+          transactionId: transaction.id,
+          accountId: destination.id,
+          type: 'CREDIT',
+          amount: '2.00',
+        },
+      ],
+    })
+  }
+})
+
+test('ledger verification is restricted to administrators', async () => {
+  const owner = await createUser()
+  const { response } = await getAs(owner.id, '/api/admin/ledger/verification')
+
+  assert.equal(response.status, 403)
 })

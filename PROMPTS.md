@@ -75,6 +75,12 @@ The work included:
 - Updating the production cookie configuration to use `SameSite=None` with `Secure`, while retaining `SameSite=Strict` for local development.
 - Running available tests and deploying the changes.
 
+### 1.7 Complete Basic Banking Workflows
+
+I asked Copilot to inspect the existing application and complete missing submission-ready features without rewriting working code or changing production data.
+
+The work added account-holder simulated deposits, admin user/application views and status filters, and read-only ledger verification. It also improved dashboard validation and refresh behavior, masked non-owned account numbers in transaction responses, and added isolated integration-test cases. Integration tests remain dependent on the dedicated local test database.
+
 ## 2. Errors and Corrections
 
 1. **Test database setup error:** The initial Node.js command failed because PowerShell removed embedded SQL quotes when passing the script through `node -e`. The error was diagnosed, and the script was subsequently passed through standard input with database safety checks.
@@ -91,7 +97,7 @@ The work included:
 
 ## 3. Testing and Verification
 
-The following local verification results were recorded:
+The following local verification results were recorded before the latest feature additions:
 
 - Backend unit tests: **4/4 passed**
 - Backend integration tests: **13/13 passed**
@@ -100,6 +106,8 @@ The following local verification results were recorded:
 - Frontend production build: Passed
 - Database migration status in the dedicated test database: Verified
 - Git diff and staged changes checks: Passed
+
+For the latest changes, backend unit tests passed (4/4), Prisma schema validation passed, and frontend lint and production build passed. The integration suite was not run because `TEST_DATABASE_URL` was not configured; newly added integration cases still need to be run against the dedicated local `balancevault_test_db`.
 
 Integration tests were performed using the dedicated local test database.
 

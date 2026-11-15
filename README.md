@@ -19,22 +19,20 @@ BalanceVault is a simulated banking application developed for learning and demon
 
 - User registration and login with hashed passwords and secure sessions.
 - Checking and savings account requests with administrator approval.
-- Account dashboard and transaction history.
-- Internal transfers and simulated withdrawals.
-- Administrator-only simulated funding and account approval.
-- Double-entry ledger records and audit events.
+- Account dashboard with application status, balances, and recent transaction history.
+- Simulated deposits, withdrawals, and internal transfers with idempotency protection.
+- Administrator application review, user/account views, and simulated demo funding.
+- Double-entry ledger records, audit events, and read-only ledger verification.
 
 ## Development Status
 
-The frontend and backend are deployed on Render. User login and the account dashboard are working.
-
-Some features, including administrator approval, money transfers, and transaction verification, are still being tested and improved.
+The frontend and backend are deployed on Render. Run the automated checks below against the current branch before submission; integration tests require the isolated local test database.
 
 All banking operations are simulated. The application does not connect to real banks or payment networks and must not be used to handle real money.
 
 ## Local Setup
 
-**Requirements:** Node.js 22.18 or newer and a MySQL-compatible database.
+**Requirements:** Node.js 22.18 or newer and a local MySQL-compatible database.
 
 1. Copy `backend/.env.example` to `backend/.env`.
 2. Configure `DATABASE_URL` and a secure `JWT_SECRET` of at least 32 cryptographically random bytes.
@@ -80,11 +78,13 @@ Run backend unit tests from the `backend` folder:
 npm test
 ```
 
-Integration tests require `TEST_DATABASE_URL` to point to the dedicated local `balancevault_test_db` database. Apply migrations before running:
+Integration tests require `TEST_DATABASE_URL` to point to the dedicated local `balancevault_test_db` database. Create that database, temporarily set `DATABASE_URL` to the same local test-database URL, and apply migrations before running:
 
 ```bash
 npm run test:integration
 ```
+
+The integration test safety checks reject non-local databases and any database other than `balancevault_test_db`. Never point migrations or tests at a production database.
 
 Run frontend checks from the `frontend` folder:
 

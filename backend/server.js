@@ -105,6 +105,13 @@ const transferLimiter = rateLimit({
   legacyHeaders: false,
   message: { message: 'Too many transfer attempts. Try again later.' },
 })
+const depositLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many deposit attempts. Try again later.' },
+})
 const transactionSelect = {
   id: true,
   type: true,
@@ -114,8 +121,8 @@ const transactionSelect = {
   description: true,
   createdAt: true,
   completedAt: true,
-  sourceAccount: { select: { accountNumber: true, type: true } },
-  destinationAccount: { select: { accountNumber: true, type: true } },
+  sourceAccount: { select: { accountNumber: true, type: true, userId: true } },
+  destinationAccount: { select: { accountNumber: true, type: true, userId: true } },
 }
 
 function normalizeEmail(email) {
@@ -149,6 +156,29 @@ function publicUser(user) {
     email: user.email,
     role: user.role,
     createdAt: user.createdAt,
+  }
+}
+
+function publicTransaction(transaction, userId) {
+  if (!transaction) {
+    return transaction
+  }
+
+  function publicAccount(account) {
+    if (!account) {
+      return null
+    }
+
+    const { userId: accountOwnerId, ...visibleAccount } = account
+    return accountOwnerId === userId
+      ? visibleAccount
+      : { ...visibleAccount, accountNumber: `****${account.accountNumber.slice(-4)}` }
+  }
+
+  return {
+    ...transaction,
+    sourceAccount: publicAccount(transaction.sourceAccount),
+    destinationAccount: publicAccount(transaction.destinationAccount),
   }
 }
 
@@ -255,6 +285,106 @@ async function assertBalancedLedger(tx, transactionId) {
   if (entries.length < 2 || debits === 0n || debits !== credits) {
     throw httpError(500, 'Transaction ledger posting failed.')
   }
+}
+
+function getLedgerIssues(transaction) {
+  const issues = []
+  let transactionAmount
+
+  try {
+    transactionAmount = decimalToUnits(transaction.amount)
+    if (transactionAmount <= 0n) {
+      issues.push('Transaction amount must be positive.')
+    }
+  } catch {
+    issues.push('Transaction amount is not a valid decimal value.')
+  }
+
+  if (transaction.status !== 'COMPLETED') {
+    if (transaction.ledgerEntries.length) {
+      issues.push('A non-completed transaction has ledger entries.')
+    }
+    if (transaction.completedAt) {
+      issues.push('A non-completed transaction has a completion time.')
+    }
+    return issues
+  }
+
+  if (!transaction.completedAt) {
+    issues.push('Completed transaction is missing its completion time.')
+  }
+
+  if (transaction.ledgerEntries.length < 2) {
+    issues.push('Completed transaction is missing ledger entries.')
+  }
+
+  let debits = 0n
+  let credits = 0n
+  let entryAmountsMatch = true
+  let entryCurrenciesMatch = true
+  for (const entry of transaction.ledgerEntries) {
+    try {
+      const amount = decimalToUnits(entry.amount)
+      if (entry.account.currency !== transaction.currency) {
+        entryCurrenciesMatch = false
+      }
+      if (amount <= 0n) {
+        entryAmountsMatch = false
+      }
+      if (transactionAmount !== undefined && amount !== transactionAmount) {
+        entryAmountsMatch = false
+      }
+      if (entry.type === 'DEBIT') {
+        debits += amount
+      } else if (entry.type === 'CREDIT') {
+        credits += amount
+      } else {
+        entryAmountsMatch = false
+      }
+    } catch {
+      entryAmountsMatch = false
+    }
+  }
+
+  if (!entryAmountsMatch) {
+    issues.push('Ledger entry amounts do not match the transaction.')
+  }
+  if (!entryCurrenciesMatch) {
+    issues.push('Ledger account currency does not match the transaction.')
+  }
+  if (debits === 0n || debits !== credits) {
+    issues.push('Ledger debits and credits are missing or unbalanced.')
+  }
+
+  const [debitEntry] = transaction.ledgerEntries.filter((entry) => entry.type === 'DEBIT')
+  const [creditEntry] = transaction.ledgerEntries.filter((entry) => entry.type === 'CREDIT')
+  const expectedAccountsMatch =
+    transaction.ledgerEntries.length === 2 &&
+    (transaction.type === 'DEPOSIT'
+      ? transaction.sourceAccountId === null &&
+        debitEntry?.account.type === 'SYSTEM' &&
+        creditEntry?.account.type !== 'SYSTEM' &&
+        creditEntry?.accountId === transaction.destinationAccountId
+      : transaction.type === 'WITHDRAWAL'
+        ? transaction.destinationAccountId === null &&
+          debitEntry?.account.type !== 'SYSTEM' &&
+          debitEntry?.accountId === transaction.sourceAccountId &&
+          creditEntry?.account.type === 'SYSTEM'
+        : transaction.type === 'TRANSFER'
+          ? transaction.sourceAccountId !== null &&
+            transaction.destinationAccountId !== null &&
+            transaction.sourceAccountId !== transaction.destinationAccountId &&
+            debitEntry?.account.type !== 'SYSTEM' &&
+            creditEntry?.account.type !== 'SYSTEM' &&
+            debitEntry?.accountId === transaction.sourceAccountId &&
+            creditEntry?.accountId === transaction.destinationAccountId
+          : false)
+
+  if (!expectedAccountsMatch) {
+    issues.push('Ledger entries do not match the transaction type and accounts.')
+  }
+
+  return issues
 }
 
 function createAccountNumber() {
@@ -498,14 +628,25 @@ app.post('/api/onboarding', requireAuth, onboardingLimiter, async (req, res) => 
   return res.status(201).json(result)
 })
 
-app.get('/api/admin/onboarding', requireAdmin, async (_req, res) => {
+app.get('/api/admin/onboarding', requireAdmin, async (req, res) => {
+  const requestedStatus = req.query?.status
+  if (
+    requestedStatus !== undefined &&
+    !['PENDING', 'APPROVED', 'REJECTED'].includes(String(requestedStatus))
+  ) {
+    return res.status(400).json({ message: 'Choose a valid application status.' })
+  }
+  const statusFilter = requestedStatus ? { status: String(requestedStatus) } : undefined
+
   const requests = await prisma.onboardingRequest.findMany({
-    where: { status: 'PENDING' },
+    where: statusFilter,
     orderBy: { submittedAt: 'asc' },
     select: {
       id: true,
       status: true,
       submittedAt: true,
+      reviewedAt: true,
+      reviewNote: true,
       applicant: { select: { id: true, fullName: true, email: true } },
       account: {
         select: {
@@ -628,6 +769,32 @@ app.get('/api/admin/accounts', requireAdmin, async (_req, res) => {
   return res.json({ accounts })
 })
 
+app.get('/api/admin/users', requireAdmin, async (_req, res) => {
+  const users = await prisma.user.findMany({
+    orderBy: { createdAt: 'desc' },
+    take: 100,
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+      role: true,
+      createdAt: true,
+      accounts: {
+        orderBy: { createdAt: 'desc' },
+        select: {
+          accountNumber: true,
+          type: true,
+          status: true,
+          currency: true,
+          balance: true,
+        },
+      },
+    },
+  })
+
+  return res.json({ users })
+})
+
 app.get('/api/admin/audit-logs', requireAdmin, async (_req, res) => {
   const entries = await prisma.auditLog.findMany({
     orderBy: { createdAt: 'desc' },
@@ -645,6 +812,43 @@ app.get('/api/admin/audit-logs', requireAdmin, async (_req, res) => {
   })
 
   return res.json({ entries })
+})
+
+app.get('/api/admin/ledger/verification', requireAdmin, async (_req, res) => {
+  const transactions = await prisma.transaction.findMany({
+    orderBy: { createdAt: 'asc' },
+    select: {
+      id: true,
+      type: true,
+      status: true,
+      amount: true,
+      currency: true,
+      sourceAccountId: true,
+      destinationAccountId: true,
+      completedAt: true,
+      ledgerEntries: {
+        select: {
+          accountId: true,
+          type: true,
+          amount: true,
+          account: { select: { type: true, currency: true } },
+        },
+      },
+    },
+  })
+
+  const issues = transactions.flatMap((transaction) => {
+    const reasons = getLedgerIssues(transaction)
+    return reasons.length ? [{ transactionId: transaction.id, reasons }] : []
+  })
+
+  return res.json({
+    checkedTransactions: transactions.length,
+    validTransactions: transactions.length - issues.length,
+    issueCount: issues.length,
+    issues,
+    verifiedAt: new Date().toISOString(),
+  })
 })
 
 app.get('/api/accounts', requireAuth, async (req, res) => {
@@ -679,7 +883,146 @@ app.get('/api/transactions', requireAuth, async (req, res) => {
     select: transactionSelect,
   })
 
-  return res.json({ transactions })
+  return res.json({
+    transactions: transactions.map((transaction) =>
+      publicTransaction(transaction, req.authUser.id),
+    ),
+  })
+})
+
+app.post('/api/transactions/deposits', requireAuth, depositLimiter, async (req, res) => {
+  if (req.authUser.role !== 'ACCOUNT_HOLDER') {
+    return res.status(403).json({ message: 'Account holder access required.' })
+  }
+
+  const accountNumber =
+    typeof req.body?.accountNumber === 'string' ? req.body.accountNumber.trim() : ''
+  const amountUnits = parseMoney(req.body?.amount)
+  const idempotencyKey = getIdempotencyKey(req)
+
+  if (!/^\d{16}$/.test(accountNumber) || !amountUnits || !idempotencyKey) {
+    return res.status(400).json({
+      message: 'Provide a valid 16-digit account number, an amount up to $10,000, and an Idempotency-Key header.',
+    })
+  }
+
+  const requestHash = hashRequest({
+    kind: 'simulated-customer-deposit',
+    accountNumber,
+    amount: amountUnits.toString(),
+  })
+  const amount = unitsToDecimal(amountUnits)
+
+  const result = await prisma.$transaction(
+    async (tx) => {
+      const previous = await findIdempotentTransaction(
+        tx,
+        req.authUser.id,
+        idempotencyKey,
+        requestHash,
+      )
+      if (previous) {
+        return { transaction: previous, replayed: true }
+      }
+
+      const account = await tx.account.findUnique({
+        where: { accountNumber },
+        select: {
+          id: true,
+          userId: true,
+          type: true,
+          status: true,
+          currency: true,
+        },
+      })
+      if (
+        !account ||
+        account.userId !== req.authUser.id ||
+        account.type === 'SYSTEM' ||
+        account.status !== 'ACTIVE'
+      ) {
+        throw httpError(404, 'Active account not found.')
+      }
+
+      const systemAccount = await getSystemAccount(tx, account.currency)
+      const credit = await tx.account.updateMany({
+        where: {
+          id: account.id,
+          userId: req.authUser.id,
+          type: { not: 'SYSTEM' },
+          status: 'ACTIVE',
+          currency: account.currency,
+        },
+        data: { balance: { increment: amount } },
+      })
+      if (credit.count !== 1) {
+        throw httpError(409, 'The account changed. Refresh and retry.')
+      }
+
+      const debitSystem = await tx.account.updateMany({
+        where: {
+          id: systemAccount.id,
+          type: 'SYSTEM',
+          userId: null,
+          status: 'ACTIVE',
+          currency: account.currency,
+        },
+        data: { balance: { increment: amount } },
+      })
+      if (debitSystem.count !== 1) {
+        throw httpError(409, 'The system clearing account changed.')
+      }
+
+      const transaction = await tx.transaction.create({
+        data: {
+          type: 'DEPOSIT',
+          status: 'COMPLETED',
+          amount,
+          currency: account.currency,
+          destinationAccountId: account.id,
+          initiatedById: req.authUser.id,
+          description: 'Simulated deposit',
+          completedAt: new Date(),
+        },
+        select: transactionSelect,
+      })
+
+      await tx.ledgerEntry.createMany({
+        data: [
+          { transactionId: transaction.id, accountId: systemAccount.id, type: 'DEBIT', amount },
+          { transactionId: transaction.id, accountId: account.id, type: 'CREDIT', amount },
+        ],
+      })
+      await assertBalancedLedger(tx, transaction.id)
+      await tx.idempotencyKey.create({
+        data: {
+          userId: req.authUser.id,
+          key: idempotencyKey,
+          requestHash,
+          transactionId: transaction.id,
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        },
+      })
+      await tx.auditLog.create({
+        data: {
+          actorId: req.authUser.id,
+          action: 'DEPOSIT_COMPLETED',
+          targetType: 'Transaction',
+          targetId: transaction.id,
+          outcome: 'SUCCESS',
+          metadata: { accountId: account.id, amount, currency: account.currency },
+        },
+      })
+
+      return { transaction, replayed: false }
+    },
+    { isolationLevel: 'Serializable' },
+  )
+
+  return res.status(result.replayed ? 200 : 201).json({
+    ...result,
+    transaction: publicTransaction(result.transaction, req.authUser.id),
+  })
 })
 
 app.post('/api/transactions/transfers', requireAuth, transferLimiter, async (req, res) => {
@@ -825,7 +1168,10 @@ app.post('/api/transactions/transfers', requireAuth, transferLimiter, async (req
     { isolationLevel: 'Serializable' },
   )
 
-  return res.status(result.replayed ? 200 : 201).json(result)
+  return res.status(result.replayed ? 200 : 201).json({
+    ...result,
+    transaction: publicTransaction(result.transaction, req.authUser.id),
+  })
 })
 
 app.post('/api/transactions/withdrawals', requireAuth, transferLimiter, async (req, res) => {
@@ -973,7 +1319,10 @@ app.post('/api/transactions/withdrawals', requireAuth, transferLimiter, async (r
     { isolationLevel: 'Serializable' },
   )
 
-  return res.status(result.replayed ? 200 : 201).json(result)
+  return res.status(result.replayed ? 200 : 201).json({
+    ...result,
+    transaction: publicTransaction(result.transaction, req.authUser.id),
+  })
 })
 
 app.post('/api/admin/accounts/:accountId/deposits', requireAdmin, async (req, res) => {
@@ -1102,7 +1451,10 @@ app.post('/api/admin/accounts/:accountId/deposits', requireAdmin, async (req, re
     { isolationLevel: 'Serializable' },
   )
 
-  return res.status(result.replayed ? 200 : 201).json(result)
+  return res.status(result.replayed ? 200 : 201).json({
+    ...result,
+    transaction: publicTransaction(result.transaction, req.authUser.id),
+  })
 })
 
 app.post('/api/auth/register', registrationLimiter, async (req, res) => {

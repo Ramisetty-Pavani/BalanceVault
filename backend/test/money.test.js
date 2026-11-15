@@ -6,6 +6,7 @@ test('money parsing preserves exact decimal values and enforces the limit', () =
   assert.equal(parseMoney('0.01'), 100n)
   assert.equal(parseMoney('125.5'), 1_255_000n)
   assert.equal(parseMoney('10000.00'), 100_000_000n)
+  assert.equal(parseMoney(125.5), 1_255_000n)
   assert.equal(parseMoney('10000.01'), null)
   assert.equal(parseMoney('0'), null)
   assert.equal(parseMoney('01.00'), null)

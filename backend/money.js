@@ -3,11 +3,13 @@ const MONEY_SCALE = 10_000n
 const MAX_AMOUNT = 10_000n * MONEY_SCALE
 
 function parseMoney(value) {
-  if (typeof value !== 'string' || !MONEY_PATTERN.test(value)) {
+  const numericValue = typeof value === 'number' ? String(value) : value
+
+  if (typeof numericValue !== 'string' || !MONEY_PATTERN.test(numericValue)) {
     return null
   }
 
-  const [whole, fraction = ''] = value.split('.')
+  const [whole, fraction = ''] = numericValue.split('.')
   const units = BigInt(whole) * MONEY_SCALE + BigInt(fraction.padEnd(4, '0'))
 
   return units > 0n && units <= MAX_AMOUNT ? units : null
