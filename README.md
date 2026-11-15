@@ -30,6 +30,19 @@ The frontend and backend are deployed on Render. Run the automated checks below 
 
 All banking operations are simulated. The application does not connect to real banks or payment networks and must not be used to handle real money.
 
+## Render Single-Origin Deployment
+
+The frontend and API must use the same site so browsers can send the HttpOnly session cookie reliably. The repository root deployment serves the built frontend from the backend.
+
+For the Render backend web service, set the root directory to the repository root and use:
+
+- Build command: `npm run build`
+- Start command: `npm start`
+- `VITE_API_URL=/` (used when building the frontend)
+- `CORS_ORIGIN=https://balancevault-backend-1n8h.onrender.com`
+
+Keep the existing `DATABASE_URL` and `JWT_SECRET` values. After deploying, open the backend service URL (`https://balancevault-backend-1n8h.onrender.com`) as the website; the separate Render Static Site does not provide same-origin sessions.
+
 ## Local Setup
 
 **Requirements:** Node.js 22.18 or newer and a local MySQL-compatible database.

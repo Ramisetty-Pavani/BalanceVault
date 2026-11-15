@@ -2,8 +2,11 @@
 import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
+import { existsSync } from 'node:fs'
 import { rateLimit } from 'express-rate-limit'
 import { createHash, randomBytes } from 'node:crypto'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { PrismaMariaDb } from '@prisma/adapter-mariadb'
 import { PrismaClient } from './generated/prisma/client.ts'
 import {
@@ -23,6 +26,7 @@ const port = Number(process.env.PORT) || 4000
 const sessionSecret = process.env.JWT_SECRET
 const isProduction = process.env.NODE_ENV === 'production'
 const sessionCookieName = 'bv_session'
+const frontendDistPath = join(dirname(fileURLToPath(import.meta.url)), '../frontend/dist')
 const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
   .split(',')
   .map((origin) => origin.trim())
@@ -1533,6 +1537,21 @@ app.post('/api/auth/logout', (_req, res) => {
   clearSessionCookie(res)
   return res.status(204).end()
 })
+
+if (existsSync(frontendDistPath)) {
+  app.use(express.static(frontendDistPath, { index: false }))
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' || req.path === '/api' || req.path.startsWith('/api/')) {
+      return next()
+    }
+
+    return res.sendFile(join(frontendDistPath, 'index.html'), (error) => {
+      if (error) {
+        next(error)
+      }
+    })
+  })
+}
 
 app.use((error, _req, res, _next) => {
   if (error && error.message === 'Origin not allowed by CORS') {
